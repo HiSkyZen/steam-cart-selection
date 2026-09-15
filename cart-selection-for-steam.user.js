@@ -23,6 +23,7 @@
 // @name:pt-BR      Cart Selection for Steam
 // @name:ro      Cart Selection for Steam
 // @name:ru      Cart Selection for Steam
+// @name:es      Cart Selection for Steam
 // @name:es-ES      Cart Selection for Steam
 // @name:es-419      Cart Selection for Steam
 // @name:sv      Cart Selection for Steam
@@ -54,6 +55,7 @@
 // @description:pt-BR  Selecione e compre apenas os itens desejados no carrinho da Steam, mantendo os demais.
 // @description:ro  Selectează și cumpără doar articolele dorite din coșul Steam, păstrând restul.
 // @description:ru  Выбирайте и покупайте только нужные товары из корзины Steam, сохраняя остальные.
+// @description:es  Selecciona y compra solo los artículos que quieras de tu carrito de Steam y conserva el resto.
 // @description:es-ES  Selecciona y compra solo los artículos que quieras de tu carro de Steam y conserva el resto.
 // @description:es-419  Selecciona y compra solo los artículos que quieras de tu carrito de Steam y conserva los demás.
 // @description:sv  Välj och köp endast önskade objekt från Steam-kundvagnen och behåll resten.
@@ -62,8 +64,9 @@
 // @description:uk  Вибирайте й купуйте лише потрібні товари з кошика Steam, зберігаючи решту.
 // @description:vi  Chọn và mua chỉ những mục bạn muốn trong giỏ hàng Steam, đồng thời giữ nguyên các mục còn lại.
 // @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.1.1
+// @version      1.1.2
 // @author       HiSkyZen
+// @license      MIT
 // @match        https://store.steampowered.com/cart*
 // @match        https://store.steampowered.com/checkout*
 // @match        https://checkout.steampowered.com/*
@@ -87,7 +90,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'Cart Selection for Steam';
-  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.1';
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.2';
   const RECOVERY_KEY = 'cfs_recovery_v1';
   const LEGACY_RECOVERY_KEY = 'ssc_recovery_v1';
   const LANGUAGE_KEY = 'cfs_language_v1';

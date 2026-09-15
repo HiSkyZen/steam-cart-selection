@@ -1,3 +1,8 @@
+## 1.1.2 — 2026-09-16
+
+- Added the generic Spanish `@name:es`/`@description:es` metadata required by Greasy Fork when Spanish additional info is present.
+- Declared `@license MIT` in the userscript metadata and added the repository MIT license.
+
 ## 1.1.1 — 2026-09-16
 
 - Expanded userscript metadata localization to all 31 Steam interface languages (English default plus 30 localized `@name`/`@description` entries) for Greasy Fork and userscript-manager listings.

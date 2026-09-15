@@ -57,3 +57,5 @@ jobs:
           git add cart-selection-for-steam.user.js CHANGELOG.md
           git commit -m 'fix: derive UI version from userscript metadata'
           git push
+
+# Trigger after workflow registration.

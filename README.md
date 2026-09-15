@@ -57,6 +57,10 @@ If checkout was interrupted before Steam produced a confirmed receipt, use the c
 
 If Steam changes its internal cart APIs, open an issue and include the visible error message and reproduction steps. Avoid posting HAR files publicly without removing authentication tokens first.
 
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
 ## Disclaimer
 
 This is an unofficial userscript and is not affiliated with Valve or Steam. It relies on Steam Store web interfaces and internal Web API endpoints, which can change without notice.

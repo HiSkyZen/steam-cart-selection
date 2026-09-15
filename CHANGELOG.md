@@ -1,3 +1,7 @@
+## 1.0.2 — 2026-09-16
+
+- Fixed the in-panel version label so it reads the installed userscript version from `GM_info` instead of showing a hard-coded `v1.0.0`.
+
 ## 1.0.1 — 2026-09-15
 
 - Changed the unknown-language fallback from Korean to English.

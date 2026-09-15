@@ -9,7 +9,7 @@
 // @description:zh-CN  从 Steam 购物车中只选择要结算的项目，并保留其余项目。
 // @description:zh-TW  從 Steam 購物車中只選擇要結帳的項目，並保留其餘項目。
 // @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.0.1
+// @version      1.0.2
 // @description  Select only the Steam cart items you want to check out while preserving the rest.
 // @author       HiSkyZen
 // @match        https://store.steampowered.com/cart*
@@ -21,6 +21,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_info
 // @connect      api.steampowered.com
 // @homepageURL   https://github.com/HiSkyZen/steam-cart-selection
 // @supportURL    https://github.com/HiSkyZen/steam-cart-selection/issues
@@ -33,6 +34,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'Cart Selection for Steam';
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.0.2';
   const RECOVERY_KEY = 'cfs_recovery_v1';
   const LEGACY_RECOVERY_KEY = 'ssc_recovery_v1';
   const LANGUAGE_KEY = 'cfs_language_v1';
@@ -2124,7 +2126,7 @@
       <div class="ssc-head">
         <div>
           <div class="ssc-title">Cart Selection for Steam</div>
-          <div class="ssc-subtitle">v1.0.0</div>
+          <div class="ssc-subtitle">v${SCRIPT_VERSION}</div>
         </div>
         <button class="ssc-icon-btn ssc-collapse" title="${t('collapse')}">−</button>
       </div>

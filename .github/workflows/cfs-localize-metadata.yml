@@ -1,0 +1,29 @@
+name: Localize userscript metadata
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cfs-localize-metadata.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  localize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply metadata localization
+        run: python3 .github/cfs-localize-metadata.py
+      - name: Syntax check
+        run: node --check cart-selection-for-steam.user.js
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "HiSkyZen"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cart-selection-for-steam.user.js CHANGELOG.md
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: localize userscript metadata for Steam languages"
+          git push

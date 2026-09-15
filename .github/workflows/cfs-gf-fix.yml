@@ -1,0 +1,29 @@
+name: Fix Greasy Fork metadata
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cfs-gf-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply metadata fix
+        run: python3 .github/cfs-gf-fix.py
+      - name: Syntax check
+        run: node --check cart-selection-for-steam.user.js
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "HiSkyZen"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cart-selection-for-steam.user.js CHANGELOG.md
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: satisfy Greasy Fork locale and license metadata"
+          git push

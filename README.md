@@ -9,6 +9,7 @@ Select only the items you want to buy from your Steam cart while keeping everyth
 ## Features
 
 - Select individual packages and bundles in the Steam cart.
+- Works while logged out: Steam guest carts are read through the anonymous `shoppingCartGID` flow, and partial selections use a separate verified checkout cart without modifying the original guest cart.
 - Shows the combined price of only the selected items.
 - Preserves account-specific pricing such as loyalty, ownership, Complete-the-Set, and pre-purchase discounts by falling back to Steam's signed-in account cart when required.
 - Uses a non-destructive temporary shopping cart when Steam can safely represent the selected items there.
@@ -29,13 +30,16 @@ English is used as the fallback if an unknown language code is encountered. Arab
 1. Open the [Steam cart](https://store.steampowered.com/cart/).
 2. Use the **Cart Selection for Steam** panel to choose the items you want.
 3. Review the selected total and click the localized **Checkout selected** button.
-4. For ordinary products, the script first tries a separate temporary Steam shopping cart and verifies that every selected package/bundle is actually present.
-5. For account-sensitive prices (including active/conditional discounts and coming-soon products), or whenever temporary-cart verification is not trustworthy, it uses the signed-in account cart instead. Unselected items are backed up by package/bundle ID and temporarily removed.
-6. After Steam shows a confirmed purchase receipt, the script automatically returns to the Store origin and restores parked items. The checkout banner and userscript menu remain available as manual recovery fallbacks.
+4. When logged out, the script reads Steam's anonymous cart and, for partial selections, creates a separate verified ShoppingCart; Steam can then prompt for sign-in during checkout without altering the original guest cart.
+5. For ordinary products, the script first tries a separate temporary Steam shopping cart and verifies that every selected package/bundle is actually present.
+6. For account-sensitive prices (including active/conditional discounts and coming-soon products), or whenever temporary-cart verification is not trustworthy, it uses the signed-in account cart instead. Unselected items are backed up by package/bundle ID and temporarily removed.
+7. After Steam shows a confirmed purchase receipt, the script automatically returns to the Store origin and restores parked items. The checkout banner and userscript menu remain available as manual recovery fallbacks.
 
 ## Safety / privacy
 
 The userscript reads the Steam Store page's existing signed-in Web API token only while making requests to `api.steampowered.com`. The token is never written to userscript storage.
+
+When logged out, there is no account token to store. The script uses Steam's anonymous cart identifier from the storefront session only to read the guest cart and construct a separate selected-item checkout cart.
 
 When account-cart fallback is needed, recovery state is stored in userscript storage with a transaction ID/revision, originating Steam account ID, package/bundle IDs, gift information, and gift/private flags. The Steam Web API token is never persisted. If removal fails part-way through, the script attempts an immediate rollback. Before checkout, the reduced cart is verified; after restoration, the script re-reads the account cart and verifies every restored item and its gift/private flags. Coupon-applied or unknown special-state items are never destructively parked unless they can remain untouched in the selected cart.
 

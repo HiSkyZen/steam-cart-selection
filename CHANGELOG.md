@@ -1,3 +1,11 @@
+## 1.1.3 — 2026-09-16
+
+- Added logged-out Steam guest-cart support using Steam's `shoppingCartGID` cart identifier.
+- Guest selective checkout now creates and verifies a separate ShoppingCart containing only the selected packages/bundles, leaving the original anonymous cart untouched.
+- Made the Web API transport token-optional for Steam endpoints used by anonymous storefront sessions and added guest `browserid` propagation to ShoppingCart add operations.
+- Added public StoreBrowse metadata lookup for guest item names/prices while preserving authenticated account-specific pricing for signed-in users.
+- Kept account-cart recovery and destructive fallback strictly limited to signed-in account carts.
+
 ## 1.1.2 — 2026-09-16
 
 - Added the generic Spanish `@name:es`/`@description:es` metadata required by Greasy Fork when Spanish additional info is present.

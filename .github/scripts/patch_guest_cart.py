@@ -1,0 +1,501 @@
+from pathlib import Path
+
+path = Path('cart-selection-for-steam.user.js')
+s = path.read_text(encoding='utf-8')
+
+
+def replace_once(old, new, label):
+    global s
+    if old not in s:
+        raise SystemExit(f'Expected source fragment not found: {label}')
+    s = s.replace(old, new, 1)
+
+
+replace_once('// @version      1.1.2', '// @version      1.1.3', 'metadata version')
+replace_once("? GM_info.script.version : '1.1.2';", "? GM_info.script.version : '1.1.3';", 'SCRIPT_VERSION fallback')
+
+old_config = r'''  function readConfig() {
+    const el = document.querySelector('#application_config');
+    if (!el) return null;
+    const base = safeJson(el.getAttribute('data-config'));
+    const user = safeJson(el.getAttribute('data-store_user_config'));
+    return {
+      token: user.webapi_token || null,
+      steamid: String(user.steamid || user.STEAMID || user.steam_id || ''),
+      country: base.COUNTRY || base.country || null,
+      language: base.LANGUAGE || base.language || 'english',
+    };
+  }
+
+  async function waitForConfig(timeoutMs = 15000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const cfg = readConfig();
+      if (cfg?.token) return cfg;
+      await sleep(200);
+    }
+    return readConfig();
+  }
+'''
+new_config = r'''  function readCookie(name) {
+    const prefix = `${name}=`;
+    for (const part of document.cookie.split(';')) {
+      const value = part.trim();
+      if (!value.startsWith(prefix)) continue;
+      const raw = value.slice(prefix.length);
+      try { return decodeURIComponent(raw); } catch { return raw; }
+    }
+    return null;
+  }
+
+  function normalizeUint64(value) {
+    const text = String(value ?? '').trim();
+    return /^\d{1,20}$/.test(text) && text !== '0' ? text : null;
+  }
+
+  function readConfig() {
+    const el = document.querySelector('#application_config');
+    if (!el) return null;
+    const base = safeJson(el.getAttribute('data-config'));
+    const user = safeJson(el.getAttribute('data-store_user_config'));
+    const embeddedCart = user.shoppingcart && typeof user.shoppingcart === 'object' ? user.shoppingcart : null;
+    const embeddedGid = normalizeUint64(
+      embeddedCart?.gidshoppingcart ?? embeddedCart?.gid_shopping_cart ?? embeddedCart?.gid ??
+      (typeof user.shoppingcart === 'string' || typeof user.shoppingcart === 'number' ? user.shoppingcart : null)
+    );
+    return {
+      token: user.webapi_token || null,
+      steamid: String(user.steamid || user.STEAMID || user.steam_id || ''),
+      country: base.COUNTRY || base.country || null,
+      language: base.LANGUAGE || base.language || 'english',
+      browserid: normalizeUint64(readCookie('browserid')),
+      guestCartGid: normalizeUint64(readCookie('shoppingCartGID')) || embeddedGid,
+      embeddedShoppingCart: embeddedCart,
+    };
+  }
+
+  async function waitForConfig(timeoutMs = 15000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const cfg = readConfig();
+      // Logged-out Steam pages intentionally have no webapi_token. The application
+      // config itself is enough; guest carts are identified by shoppingCartGID.
+      if (cfg) return cfg;
+      await sleep(200);
+    }
+    return readConfig();
+  }
+'''
+replace_once(old_config, new_config, 'readConfig/waitForConfig')
+
+old_api = r'''  function apiUrl(serviceMethod, token) {
+    const sep = serviceMethod.includes('?') ? '&' : '?';
+    return `${API_BASE}/${serviceMethod}${sep}access_token=${encodeURIComponent(token)}`;
+  }
+
+  async function apiGet(serviceMethod, token, input = null) {
+    let url = apiUrl(serviceMethod, token);
+    if (input) url += `&input_json=${encodeURIComponent(JSON.stringify(input))}`;
+    const r = await gmRequest({ method: 'GET', url });
+    return r.json || {};
+  }
+'''
+new_api = r'''  function apiUrl(serviceMethod, token = null) {
+    const base = `${API_BASE}/${serviceMethod}`;
+    if (!token) return base;
+    const sep = serviceMethod.includes('?') ? '&' : '?';
+    return `${base}${sep}access_token=${encodeURIComponent(token)}`;
+  }
+
+  async function apiGet(serviceMethod, token, input = null) {
+    let url = apiUrl(serviceMethod, token);
+    if (input) {
+      const sep = url.includes('?') ? '&' : '?';
+      url += `${sep}input_json=${encodeURIComponent(JSON.stringify(input))}`;
+    }
+    const r = await gmRequest({ method: 'GET', url });
+    return r.json || {};
+  }
+'''
+replace_once(old_api, new_api, 'token-optional API transport')
+
+guest_helpers = r'''
+  function currentGuestCartGid() {
+    const cookieGid = normalizeUint64(readCookie('shoppingCartGID'));
+    if (cookieGid) {
+      if (state.config) state.config.guestCartGid = cookieGid;
+      return cookieGid;
+    }
+    return normalizeUint64(state.config?.guestCartGid);
+  }
+
+  function normalizeGuestLineItem(line) {
+    if (!line || typeof line !== 'object') return null;
+
+    // Be liberal here: Steam has used both protobuf JSON names and account-cart-like
+    // objects in different storefront surfaces.
+    if (line.packageid || line.bundleid) {
+      return {
+        ...line,
+        line_item_id: String(line.line_item_id ?? line.lineitemid ?? line.gidlineitem ?? ''),
+        flags: normalizeFlags(line),
+        _guest_cart_item: true,
+      };
+    }
+
+    const pkg = line.package_item || line.packageitem || null;
+    const bundle = line.bundle_item || line.bundleitem || null;
+    if (!pkg && !bundle) return null;
+
+    const cost = pkg?.costwhenadded || pkg?.cost_when_added || null;
+    const amount = cost?.amount ?? cost?.amount_in_cents;
+    const currency = cost?.currencycode ?? cost?.currency_code;
+    const priceWhenAdded = amount != null && currency != null ? {
+      amount_in_cents: String(amount),
+      currency_code: Number(currency),
+      formatted_amount: '',
+    } : undefined;
+
+    return {
+      line_item_id: String(line.gidlineitem ?? line.gid_line_item ?? line.line_item_id ?? ''),
+      ...(pkg?.packageid ? { packageid: Number(pkg.packageid) } : {}),
+      ...(bundle?.bundleid ? { bundleid: Number(bundle.bundleid) } : {}),
+      ...(priceWhenAdded ? { price_when_added: priceWhenAdded } : {}),
+      flags: {
+        is_gift: Boolean(pkg?.is_gift),
+        is_private: false,
+      },
+      _guest_cart_item: true,
+    };
+  }
+
+  function normalizeEmbeddedGuestCart(cart, fallbackGid = null) {
+    if (!cart || typeof cart !== 'object') return null;
+    const rawContents = cart.contents || cart;
+    const rawLines = rawContents.lineitems || rawContents.line_items || cart.line_items || [];
+    if (!Array.isArray(rawLines)) return null;
+    const lineItems = rawLines.map(normalizeGuestLineItem).filter(Boolean);
+    const gid = normalizeUint64(
+      cart.gidshoppingcart ?? cart.gid_shopping_cart ?? cart.gid ?? fallbackGid
+    );
+    return {
+      gidshoppingcart: gid,
+      line_items: lineItems,
+      is_valid: cart.is_valid ?? true,
+      _guest_cart: true,
+    };
+  }
+
+  async function getGuestCart() {
+    const gid = currentGuestCartGid();
+    const embedded = normalizeEmbeddedGuestCart(state.config?.embeddedShoppingCart, gid);
+    if (!gid) return embedded || { gidshoppingcart: null, line_items: [], is_valid: true, _guest_cart: true };
+
+    try {
+      const data = await apiGet(
+        'IShoppingCartService/GetShoppingCartContents/v1/',
+        null,
+        { gidshoppingcart: String(gid) },
+      );
+      const response = data?.response;
+      const contents = response?.contents;
+      if (!contents) throw new Error('Steam guest cart response did not contain contents.');
+      const rawLines = contents.lineitems || contents.line_items || [];
+      const lineItems = rawLines.map(normalizeGuestLineItem).filter(Boolean);
+      const responseGid = normalizeUint64(response?.gidshoppingcart) || gid;
+      if (state.config) state.config.guestCartGid = responseGid;
+      return {
+        gidshoppingcart: responseGid,
+        line_items: lineItems,
+        is_valid: contents.is_valid ?? true,
+        _guest_cart: true,
+      };
+    } catch (error) {
+      if (embedded) {
+        log('Guest ShoppingCart API lookup failed; using embedded Steam cart data.', error);
+        return embedded;
+      }
+      throw error;
+    }
+  }
+
+  async function getActiveCart() {
+    return state.config?.token ? getAccountCart() : getGuestCart();
+  }
+
+'''
+replace_once('  function lineKey(item) {', guest_helpers + '  function lineKey(item) {', 'guest cart helpers')
+
+old_meta = r'''      // This request MUST be authenticated. Unauthenticated StoreBrowse prices are
+      // generic store prices and can miss account-specific loyalty/ownership offers.
+      const url = `${apiUrl('IStoreBrowseService/GetItems/v1/', state.config.token)}&input_json=${encodeURIComponent(JSON.stringify(input))}`;
+      const r = await gmRequest({ method: 'GET', url });
+'''
+new_meta = r'''      // Logged-in requests use the session token so loyalty/ownership prices can be
+      // resolved. Logged-out carts deliberately use public StoreBrowse metadata.
+      const token = state.config?.token || null;
+      let url = apiUrl('IStoreBrowseService/GetItems/v1/', token);
+      url += `${url.includes('?') ? '&' : '?'}input_json=${encodeURIComponent(JSON.stringify(input))}`;
+      const r = await gmRequest({ method: 'GET', url });
+'''
+replace_once(old_meta, new_meta, 'StoreBrowse guest transport')
+replace_once('      state.metadataAuthenticated = true;\n      return result;', '      state.metadataAuthenticated = Boolean(token);\n      return result;', 'metadata auth flag')
+replace_once("      log('Authenticated metadata lookup failed; account-cart fallback will be preferred.', e);", "      log('StoreBrowse metadata lookup failed.', e);", 'metadata error log')
+
+old_direct = r'''  function canUseDirectCart(items) {
+    if (!state.metadataAuthenticated) return false;
+    return items.length > 0 && items.every(item =>
+      Boolean(item.packageid || item.bundleid) && !requiresAccountCart(item)
+    );
+  }
+'''
+new_direct = r'''  function canUseDirectCart(items) {
+    if (!items.length) return false;
+    if (!state.config?.token) {
+      // A guest has no account ownership state to preserve. Steam will validate and
+      // re-price the isolated cart again when checkout/login begins.
+      return items.every(item => {
+        const flags = normalizeFlags(item);
+        return Boolean(item.packageid || item.bundleid) && !flags.is_gift && !flags.is_private;
+      });
+    }
+    if (!state.metadataAuthenticated) return false;
+    return items.every(item =>
+      Boolean(item.packageid || item.bundleid) && !requiresAccountCart(item)
+    );
+  }
+'''
+replace_once(old_direct, new_direct, 'canUseDirectCart')
+
+replace_once(
+    '      const packages = items.filter(item => item.packageid);\n      const bundles = items.filter(item => item.bundleid);',
+    "      const browserField = state.config?.browserid ? { browserid: state.config.browserid } : {};\n      const packages = items.filter(item => item.packageid);\n      const bundles = items.filter(item => item.bundleid);",
+    'browser field declaration',
+)
+replace_once(
+    "            gidshoppingcart: String(gid),\n            ...countryField('store_country_code'),",
+    "            gidshoppingcart: String(gid),\n            ...browserField,\n            ...countryField('store_country_code'),",
+    'AddPackages browserid',
+)
+replace_once(
+    "          gidshoppingcart: String(gid),\n          bundleid: Number(item.bundleid),\n          ...countryField('store_country'),",
+    "          gidshoppingcart: String(gid),\n          bundleid: Number(item.bundleid),\n          ...browserField,\n          ...countryField('store_country'),",
+    'AddBundle browserid',
+)
+
+start = s.index('  async function beginSelectiveCheckout() {')
+end = s.index('  function analyzeFormattedPrice(sample) {', start)
+new_checkout = r'''  async function beginSelectiveCheckout() {
+    if (state.busy) return;
+    state.busy = true;
+    renderFooter();
+
+    try {
+      const existingRecovery = getRecovery();
+      if (existingRecovery?.items?.length) throw new Error(t('previousRecovery'));
+
+      if (!state.config) state.config = await waitForConfig();
+      if (!state.config) throw new Error('Steam page configuration is unavailable.');
+      const guestMode = !state.config.token;
+      const freshCart = await getActiveCart();
+      const freshItems = freshCart.line_items || [];
+      if (!freshItems.length) throw new Error(t('cartEmpty'));
+
+      const selectedKeys = new Set(state.selected);
+      const selectedItems = freshItems.filter(item => selectedKeys.has(lineKey(item)));
+      const parkedItems = freshItems.filter(item => !selectedKeys.has(lineKey(item)));
+      if (!selectedItems.length) throw new Error(t('selectOne'));
+
+      if (guestMode) {
+        // Never destructively edit Steam's anonymous shoppingCartGID. If every item is
+        // selected, hand the existing guest cart directly to Steam checkout. For a
+        // subset, create a separate cart containing only the selection and verify it.
+        if (!parkedItems.length) {
+          const gid = cartGid(freshCart) || currentGuestCartGid();
+          if (!gid) throw new Error('Steam guest cart ID is unavailable.');
+          setStatus(t('processing'), 'ok');
+          location.assign(checkoutUrl(gid));
+          return;
+        }
+
+        setStatus(t('processing'));
+        const directGid = await tryDirectTemporaryCart(selectedItems);
+        if (!directGid) {
+          throw new Error(
+            'Steam could not create and verify a separate guest checkout cart. The original guest cart was not modified.'
+          );
+        }
+        setStatus(t('processing'), 'ok');
+        location.assign(checkoutUrl(directGid));
+        return;
+      }
+
+      if (!parkedItems.length) {
+        setStatus(t('processing'), 'ok');
+        location.assign(accountCartCheckoutUrl());
+        return;
+      }
+
+      const accountSensitive = !state.metadataAuthenticated || selectedItems.some(requiresAccountCart);
+      setStatus(t('processing'), accountSensitive ? 'warn' : '');
+      const directGid = accountSensitive ? null : await tryDirectTemporaryCart(selectedItems);
+      if (directGid) {
+        setStatus(t('processing'), 'ok');
+        location.assign(checkoutUrl(directGid));
+        return;
+      }
+
+      const unsafeParked = parkedItems.filter(cannotSafelyRecreate);
+      if (unsafeParked.length) {
+        throw makeRecoveryError(
+          'Selective checkout cannot safely park a coupon-applied or unsupported special cart item. Leave that item selected or remove its special state first.',
+          unsafeParked
+        );
+      }
+
+      const ok = window.confirm(t('fallbackConfirm', {
+        selected: selectedItems.length,
+        parked: parkedItems.length,
+      }));
+      if (!ok) return;
+
+      const recovery = {
+        version: RECOVERY_SCHEMA_VERSION,
+        transaction_id: createTransactionId(),
+        revision: 0,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        stage: 'removing',
+        source_steamid: state.config.steamid || null,
+        source_country: state.config.country || null,
+        items: parkedItems.map(backupItem),
+        selected_keys: selectedItems.map(lineKey),
+        removed_count: 0,
+      };
+      updateRecovery(recovery, 'removing');
+      setStatus(t('processing'), 'warn');
+
+      try {
+        for (const item of parkedItems) {
+          await removeAccountItem(item);
+          recovery.removed_count += 1;
+          updateRecovery(recovery);
+        }
+      } catch (error) {
+        setStatus(t('processing'), 'error');
+        try {
+          await rollbackRemoved(recovery);
+        } catch (rollbackError) {
+          log('Rollback failed.', rollbackError);
+          recovery.last_error = rollbackError?.message || String(rollbackError);
+          updateRecovery(recovery, 'recovery_required');
+          reportRecoveryFailure(rollbackError, recovery.items);
+        }
+        throw error;
+      }
+
+      const reducedCart = await getAccountCart();
+      const reducedItems = reducedCart.line_items || [];
+      const remainingKeys = new Set(reducedItems.map(lineKey));
+      const expectedKeys = new Set(selectedItems.map(lineKey));
+      const mismatch = [...expectedKeys].some(k => !remainingKeys.has(k)) ||
+        [...remainingKeys].some(k => !expectedKeys.has(k));
+
+      if (mismatch) {
+        setStatus(t('processing'), 'error');
+        await rollbackRemoved(recovery);
+        throw new Error('Cart verification failed after parking unselected items.');
+      }
+
+      recovery.checkout_started_at = Date.now();
+      updateRecovery(recovery, 'checkout');
+      setStatus(t('processing'), 'ok');
+      location.assign(accountCartCheckoutUrl());
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] checkout failed`, e);
+      setStatus(t('error', { error: e.message || e }), 'error');
+      const activeRecovery = getRecovery();
+      if (activeRecovery?.stage === 'recovery_required') {
+        reportRecoveryFailure(e, activeRecovery.items || e?.recoveryItems || []);
+      }
+    } finally {
+      state.busy = false;
+      renderFooter();
+    }
+  }
+
+'''
+s = s[:start] + new_checkout + s[end:]
+
+old_load = r'''      state.config = await waitForConfig();
+      if (state.config?.language) { uiLanguage = normalizeSteamLanguage(state.config.language); GM_setValue(LANGUAGE_KEY, uiLanguage); }
+      if (!state.config?.token) throw new Error(t('tokenMissing'));
+
+      state.cart = await getAccountCart();
+'''
+new_load = r'''      state.config = await waitForConfig();
+      if (!state.config) throw new Error('Steam page configuration is unavailable.');
+      if (state.config?.language) { uiLanguage = normalizeSteamLanguage(state.config.language); GM_setValue(LANGUAGE_KEY, uiLanguage); }
+
+      state.cart = await getActiveCart();
+'''
+replace_once(old_load, new_load, 'loadCartUi guest branch')
+
+required = [
+    '// @version      1.1.3',
+    "language: base.LANGUAGE || base.language || 'english'",
+    "readCookie('shoppingCartGID')",
+    'async function getGuestCart()',
+    'async function getActiveCart()',
+    'const guestMode = !state.config.token;',
+    'The original guest cart was not modified.',
+    'browserid: state.config.browserid',
+]
+for needle in required:
+    if needle not in s:
+        raise SystemExit(f'Missing expected v1.1.3 feature: {needle}')
+if "if (!state.config?.token) throw new Error(t('tokenMissing'));" in s:
+    raise SystemExit('loadCartUi still hard-requires login')
+
+path.write_text(s, encoding='utf-8')
+
+changelog = Path('CHANGELOG.md')
+logtext = changelog.read_text(encoding='utf-8')
+entry = '''## 1.1.3 — 2026-09-16
+
+- Added logged-out Steam guest-cart support using Steam's `shoppingCartGID` cart identifier.
+- Guest selective checkout now creates and verifies a separate ShoppingCart containing only the selected packages/bundles, leaving the original anonymous cart untouched.
+- Made the Web API transport token-optional for Steam endpoints used by anonymous storefront sessions and added guest `browserid` propagation to ShoppingCart add operations.
+- Added public StoreBrowse metadata lookup for guest item names/prices while preserving authenticated account-specific pricing for signed-in users.
+- Kept account-cart recovery and destructive fallback strictly limited to signed-in account carts.
+
+'''
+if not logtext.startswith('## 1.1.3'):
+    changelog.write_text(entry + logtext, encoding='utf-8')
+
+readme = Path('README.md')
+r = readme.read_text(encoding='utf-8')
+feature = '- Works while logged out: Steam guest carts are read through the anonymous `shoppingCartGID` flow, and partial selections use a separate verified checkout cart without modifying the original guest cart.\n'
+anchor = '- Select individual packages and bundles in the Steam cart.\n'
+if feature not in r:
+    if anchor not in r:
+        raise SystemExit('README feature anchor missing')
+    r = r.replace(anchor, anchor + feature, 1)
+
+how_anchor = '3. Review the selected total and click the localized **Checkout selected** button.\n'
+guest_step = "4. When logged out, the script reads Steam's anonymous cart and, for partial selections, creates a separate verified ShoppingCart; Steam can then prompt for sign-in during checkout without altering the original guest cart.\n"
+if guest_step not in r:
+    if how_anchor not in r:
+        raise SystemExit('README how-it-works anchor missing')
+    r = r.replace(how_anchor, how_anchor + guest_step, 1)
+    r = r.replace('4. For ordinary products,', '5. For ordinary products,', 1)
+    r = r.replace('5. For account-sensitive prices', '6. For account-sensitive prices', 1)
+    r = r.replace('6. After Steam shows', '7. After Steam shows', 1)
+
+privacy_anchor = "The userscript reads the Steam Store page's existing signed-in Web API token only while making requests to `api.steampowered.com`. The token is never written to userscript storage.\n"
+privacy_extra = "\nWhen logged out, there is no account token to store. The script uses Steam's anonymous cart identifier from the storefront session only to read the guest cart and construct a separate selected-item checkout cart.\n"
+if privacy_extra.strip() not in r:
+    if privacy_anchor not in r:
+        raise SystemExit('README privacy anchor missing')
+    r = r.replace(privacy_anchor, privacy_anchor + privacy_extra, 1)
+readme.write_text(r, encoding='utf-8')

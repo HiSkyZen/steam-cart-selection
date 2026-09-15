@@ -40,8 +40,10 @@ jobs:
                   raise SystemExit(f'Expected source fragment not found:\n{old}')
               s = s.replace(old, new, 1)
 
-          if "'KR'" in s or "'koreana'" in s:
-              raise SystemExit('Locale-specific fallback remains in userscript')
+          if "country: base.COUNTRY || base.country || 'KR'" in s:
+              raise SystemExit('KR country fallback remains in userscript')
+          if "language: base.LANGUAGE || base.language || 'koreana'" in s:
+              raise SystemExit('Korean language fallback remains in userscript')
 
           path.write_text(s, encoding='utf-8')
 
@@ -60,5 +62,3 @@ jobs:
           git add cart-selection-for-steam.user.js CHANGELOG.md
           git commit -m 'fix: use English as neutral fallback'
           git push
-
-# Triggered after workflow creation so the workflow already exists on the default branch.

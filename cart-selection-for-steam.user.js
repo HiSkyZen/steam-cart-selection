@@ -9,7 +9,7 @@
 // @description:zh-CN  从 Steam 购物车中只选择要结算的项目，并保留其余项目。
 // @description:zh-TW  從 Steam 購物車中只選擇要結帳的項目，並保留其餘項目。
 // @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.0.0
+// @version      1.0.1
 // @description  Select only the Steam cart items you want to check out while preserving the rest.
 // @author       HiSkyZen
 // @match        https://store.steampowered.com/cart*
@@ -1412,8 +1412,8 @@
     return {
       token: user.webapi_token || null,
       steamid: String(user.steamid || user.STEAMID || user.steam_id || ''),
-      country: base.COUNTRY || base.country || 'KR',
-      language: base.LANGUAGE || base.language || 'koreana',
+      country: base.COUNTRY || base.country || null,
+      language: base.LANGUAGE || base.language || 'english',
     };
   }
 
@@ -1474,9 +1474,13 @@
     return r.json || {};
   }
 
+  function countryField(key) {
+    return state.config.country ? { [key]: state.config.country } : {};
+  }
+
   async function getAccountCart() {
     const data = await apiGet('IAccountCartService/GetCart/v1/', state.config.token, {
-      user_country: state.config.country,
+      ...countryField('user_country'),
     });
     const cart = data?.response?.cart;
     if (!cart) throw new Error('Steam account cart response did not contain a cart.');
@@ -1522,7 +1526,7 @@
       submethod: '',
       feature: 'cart-selection-for-steam',
       depth: 1,
-      countrycode: state.config.country,
+      ...countryField('countrycode'),
       webkey: 0,
       is_client: false,
       curator_data: { clanid: null, listid: null },
@@ -1536,14 +1540,14 @@
     if (!id) throw new Error('Cart line item has no line_item_id.');
     return apiPost('IAccountCartService/RemoveItemFromCart/v1/', state.config.token, {
       line_item_id: id,
-      user_country: state.config.country,
+      ...countryField('user_country'),
     });
   }
 
   async function addAccountItems(items) {
     if (!items.length) return null;
     return apiPost('IAccountCartService/AddItemsToCart/v1/', state.config.token, {
-      user_country: state.config.country,
+      ...countryField('user_country'),
       items: items.map(item => ({
         ...(item.packageid ? { packageid: Number(item.packageid) } : {}),
         ...(item.bundleid ? { bundleid: Number(item.bundleid) } : {}),
@@ -1571,7 +1575,7 @@
         ids,
         context: {
           language: state.config.language,
-          country_code: state.config.country,
+          ...countryField('country_code'),
         },
         data_request: {
           include_all_purchase_options: true,
@@ -1744,7 +1748,7 @@
           state.config.token,
           {
             gidshoppingcart: String(gid),
-            store_country_code: state.config.country,
+            ...countryField('store_country_code'),
             cart_items: cartItems,
           },
         );
@@ -1755,7 +1759,7 @@
         const addBundle = await apiPost('IShoppingCartService/AddBundle/v1/', state.config.token, {
           gidshoppingcart: String(gid),
           bundleid: Number(item.bundleid),
-          store_country: state.config.country,
+          ...countryField('store_country'),
           quantity: 1,
         });
         log('Temporary cart AddBundle response', addBundle?.response || addBundle);

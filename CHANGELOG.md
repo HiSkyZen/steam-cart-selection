@@ -1,3 +1,8 @@
+## 1.0.1 — 2026-09-15
+
+- Changed the unknown-language fallback from Korean to English.
+- Removed the hard-coded KR country fallback; when Steam does not expose a country, country-specific request fields are omitted instead of forcing a region.
+
 # Changelog
 
 ## 1.0.0 — 2026-09-15

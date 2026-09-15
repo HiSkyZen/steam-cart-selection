@@ -60,3 +60,5 @@ jobs:
           git add cart-selection-for-steam.user.js CHANGELOG.md
           git commit -m 'fix: use English as neutral fallback'
           git push
+
+# Triggered after workflow creation so the workflow already exists on the default branch.

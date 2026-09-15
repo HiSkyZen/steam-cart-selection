@@ -1,0 +1,59 @@
+name: Fix UI version display
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-ui-version.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch userscript version display
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('cart-selection-for-steam.user.js')
+          s = path.read_text(encoding='utf-8')
+
+          s = s.replace('// @version      1.0.1', '// @version      1.0.2', 1)
+          if '// @grant        GM_info' not in s:
+              s = s.replace('// @grant        GM_registerMenuCommand\n', '// @grant        GM_registerMenuCommand\n// @grant        GM_info\n', 1)
+
+          marker = "  const SCRIPT_NAME = 'Cart Selection for Steam';\n"
+          if "const SCRIPT_VERSION" not in s:
+              s = s.replace(marker, marker + "  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.0.2';\n", 1)
+
+          old = '<div class="ssc-subtitle">v1.0.0</div>'
+          new = '<div class="ssc-subtitle">v${SCRIPT_VERSION}</div>'
+          if old not in s:
+              raise SystemExit('Hard-coded UI version string not found')
+          s = s.replace(old, new, 1)
+
+          if '<div class="ssc-subtitle">v1.0.0</div>' in s:
+              raise SystemExit('Old hard-coded UI version remains')
+
+          path.write_text(s, encoding='utf-8')
+
+          changelog = Path('CHANGELOG.md')
+          oldlog = changelog.read_text(encoding='utf-8')
+          entry = "## 1.0.2 — 2026-09-16\n\n- Fixed the in-panel version label so it reads the installed userscript version from `GM_info` instead of showing a hard-coded `v1.0.0`.\n\n"
+          changelog.write_text(entry + oldlog, encoding='utf-8')
+          PY
+
+          node --check cart-selection-for-steam.user.js
+
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add cart-selection-for-steam.user.js CHANGELOG.md
+          git commit -m 'fix: derive UI version from userscript metadata'
+          git push

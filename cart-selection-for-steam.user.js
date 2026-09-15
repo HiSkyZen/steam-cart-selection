@@ -1534,9 +1534,26 @@
 
   function updateRecovery(recovery, stage = null) {
     if (!recovery || typeof recovery !== 'object') return recovery;
+
+    const current = getRecovery();
+    const localRevision = Number(recovery.revision) || 0;
+    const currentRevision = Number(current?.revision) || 0;
+    const localTx = recovery.transaction_id || null;
+    const currentTx = current?.transaction_id || null;
+
+    if (localRevision > 0 && !current) {
+      throw new Error('Recovery state was cleared in another tab or context.');
+    }
+    if (localTx && currentTx && localTx !== currentTx) {
+      throw new Error('A different recovery transaction is already active.');
+    }
+    if (localTx && currentTx === localTx && currentRevision > localRevision) {
+      throw new Error('Recovery state changed in another tab. Reload before continuing.');
+    }
+
     if (stage) recovery.stage = stage;
     recovery.version = RECOVERY_SCHEMA_VERSION;
-    recovery.revision = (Number(recovery.revision) || 0) + 1;
+    recovery.revision = Math.max(localRevision, currentRevision) + 1;
     recovery.updated_at = Date.now();
     setRecovery(recovery);
     return recovery;
@@ -1751,10 +1768,15 @@
       const key = lineKey(backup);
       const matches = cartItems.filter(item => lineKey(item) === key);
       const expectedFlags = normalizeFlags(backup);
+      const expectsGiftInfo = backup.gift_info && typeof backup.gift_info === 'object' &&
+        Object.keys(backup.gift_info).length > 0;
       const match = matches.find(item => {
         const actualFlags = normalizeFlags(item);
+        const hasGiftInfo = item?.gift_info && typeof item.gift_info === 'object' &&
+          Object.keys(item.gift_info).length > 0;
         return actualFlags.is_gift === expectedFlags.is_gift &&
-          actualFlags.is_private === expectedFlags.is_private;
+          actualFlags.is_private === expectedFlags.is_private &&
+          (!expectsGiftInfo || hasGiftInfo);
       });
       if (!match) unresolved.push(backup);
     }
@@ -2040,7 +2062,10 @@
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] checkout failed`, e);
       setStatus(t('error', { error: e.message || e }), 'error');
-      if (e?.recoveryItems?.length) reportRecoveryFailure(e, e.recoveryItems);
+      const activeRecovery = getRecovery();
+      if (activeRecovery?.stage === 'recovery_required') {
+        reportRecoveryFailure(e, activeRecovery.items || e?.recoveryItems || []);
+      }
     } finally {
       state.busy = false;
       renderFooter();

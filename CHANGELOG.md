@@ -1,8 +1,8 @@
 ## 1.1.0 — 2026-09-16
 
-- Added transaction-bound account-cart recovery with revision tracking and Steam-account binding.
+- Added transaction-bound account-cart recovery with stale-revision protection across tabs and Steam-account binding.
 - Added conservative confirmed-receipt detection and automatic post-purchase restoration without persisting the Steam Web API token.
-- Added post-restore verification for product identity and gift/private flags; recovery state is retained on any mismatch.
+- Added post-restore verification for product identity, gift/private flags, and preservation of gift metadata presence; recovery state is retained on any mismatch.
 - Added recovery-failure alerts and background product-page opening for affected items.
 - Hardened coupon and unknown-special-flag handling: unsafe parked items are rejected before destructive fallback begins.
 - Kept the verified temporary-cart path for plain purchases and the existing manual recovery controls as fallbacks.

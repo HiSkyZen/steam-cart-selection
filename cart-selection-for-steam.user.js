@@ -1,16 +1,68 @@
 // ==UserScript==
 // @name         Cart Selection for Steam
-// @name:ko      Cart Selection for Steam
+// @name:ar      Cart Selection for Steam
+// @name:bg      Cart Selection for Steam
+// @name:zh-CN      Cart Selection for Steam
+// @name:zh-TW      Cart Selection for Steam
+// @name:cs      Cart Selection for Steam
+// @name:da      Cart Selection for Steam
+// @name:nl      Cart Selection for Steam
+// @name:fi      Cart Selection for Steam
+// @name:fr      Cart Selection for Steam
+// @name:de      Cart Selection for Steam
+// @name:el      Cart Selection for Steam
+// @name:hu      Cart Selection for Steam
+// @name:id      Cart Selection for Steam
+// @name:it      Cart Selection for Steam
 // @name:ja      Cart Selection for Steam
-// @name:zh-CN   Cart Selection for Steam
-// @name:zh-TW   Cart Selection for Steam
-// @description:ko  Steam 장바구니에서 원하는 항목만 골라 결제하고 나머지는 보존합니다.
-// @description:ja  Steam カートから購入したい項目だけを選び、残りを保持したまま決済できます。
-// @description:zh-CN  从 Steam 购物车中只选择要结算的项目，并保留其余项目。
-// @description:zh-TW  從 Steam 購物車中只選擇要結帳的項目，並保留其餘項目。
-// @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.1.0
+// @name:ko      Cart Selection for Steam
+// @name:ms      Cart Selection for Steam
+// @name:nb      Cart Selection for Steam
+// @name:pl      Cart Selection for Steam
+// @name:pt-PT      Cart Selection for Steam
+// @name:pt-BR      Cart Selection for Steam
+// @name:ro      Cart Selection for Steam
+// @name:ru      Cart Selection for Steam
+// @name:es-ES      Cart Selection for Steam
+// @name:es-419      Cart Selection for Steam
+// @name:sv      Cart Selection for Steam
+// @name:th      Cart Selection for Steam
+// @name:tr      Cart Selection for Steam
+// @name:uk      Cart Selection for Steam
+// @name:vi      Cart Selection for Steam
 // @description  Select only the Steam cart items you want to check out while preserving the rest.
+// @description:ar  اختر فقط عناصر سلة Steam التي تريد شراءها مع الاحتفاظ ببقية العناصر.
+// @description:bg  Избирайте само артикулите от количката на Steam, които искате да купите, като запазвате останалите.
+// @description:zh-CN  只选择并结算 Steam 购物车中想购买的项目，同时保留其余项目。
+// @description:zh-TW  只選擇並結帳 Steam 購物車中想購買的項目，同時保留其餘項目。
+// @description:cs  Vyberte a zakupte pouze požadované položky z košíku Steam a ostatní ponechte v košíku.
+// @description:da  Vælg og køb kun de ønskede varer i Steam-kurven, mens resten bevares.
+// @description:nl  Selecteer en koop alleen de gewenste items uit je Steam-winkelwagen en behoud de rest.
+// @description:fi  Valitse ja osta vain haluamasi tuotteet Steam-ostoskorista ja säilytä muut.
+// @description:fr  Sélectionnez et achetez uniquement les articles souhaités dans votre panier Steam tout en conservant les autres.
+// @description:de  Wähle und kaufe nur die gewünschten Artikel aus deinem Steam-Warenkorb und behalte den Rest.
+// @description:el  Επιλέξτε και αγοράστε μόνο τα επιθυμητά αντικείμενα από το καλάθι Steam, διατηρώντας τα υπόλοιπα.
+// @description:hu  Csak a kívánt tételeket válaszd ki és vásárold meg a Steam-kosárból, a többit megtartva.
+// @description:id  Pilih dan beli hanya item yang diinginkan dari keranjang Steam sambil mempertahankan item lainnya.
+// @description:it  Seleziona e acquista solo gli elementi desiderati dal carrello Steam mantenendo tutti gli altri.
+// @description:ja  Steam カートから購入したい項目だけを選択して決済し、残りの項目はそのまま保持します。
+// @description:ko  Steam 장바구니에서 원하는 항목만 선택해 결제하고 나머지 항목은 그대로 보존합니다.
+// @description:ms  Pilih dan beli hanya item yang dikehendaki daripada troli Steam sambil mengekalkan item lain.
+// @description:nb  Velg og kjøp bare de ønskede varene fra Steam-handlekurven, og behold resten.
+// @description:pl  Wybierz i kup tylko wybrane elementy koszyka Steam, pozostawiając pozostałe bez zmian.
+// @description:pt-PT  Selecione e compre apenas os itens desejados no carrinho da Steam, mantendo os restantes.
+// @description:pt-BR  Selecione e compre apenas os itens desejados no carrinho da Steam, mantendo os demais.
+// @description:ro  Selectează și cumpără doar articolele dorite din coșul Steam, păstrând restul.
+// @description:ru  Выбирайте и покупайте только нужные товары из корзины Steam, сохраняя остальные.
+// @description:es-ES  Selecciona y compra solo los artículos que quieras de tu carro de Steam y conserva el resto.
+// @description:es-419  Selecciona y compra solo los artículos que quieras de tu carrito de Steam y conserva los demás.
+// @description:sv  Välj och köp endast önskade objekt från Steam-kundvagnen och behåll resten.
+// @description:th  เลือกและซื้อเฉพาะรายการที่ต้องการจากรถเข็น Steam โดยเก็บรายการอื่นไว้
+// @description:tr  Steam sepetinizden yalnızca istediğiniz ürünleri seçip satın alın ve diğerlerini koruyun.
+// @description:uk  Вибирайте й купуйте лише потрібні товари з кошика Steam, зберігаючи решту.
+// @description:vi  Chọn và mua chỉ những mục bạn muốn trong giỏ hàng Steam, đồng thời giữ nguyên các mục còn lại.
+// @namespace    https://github.com/HiSkyZen/steam-cart-selection
+// @version      1.1.1
 // @author       HiSkyZen
 // @match        https://store.steampowered.com/cart*
 // @match        https://store.steampowered.com/checkout*
@@ -35,7 +87,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'Cart Selection for Steam';
-  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.0';
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.1';
   const RECOVERY_KEY = 'cfs_recovery_v1';
   const LEGACY_RECOVERY_KEY = 'ssc_recovery_v1';
   const LANGUAGE_KEY = 'cfs_language_v1';

@@ -1,3 +1,7 @@
+## 1.1.1 — 2026-09-16
+
+- Expanded userscript metadata localization to all 31 Steam interface languages (English default plus 30 localized `@name`/`@description` entries) for Greasy Fork and userscript-manager listings.
+
 ## 1.1.0 — 2026-09-16
 
 - Added transaction-bound account-cart recovery with stale-revision protection across tabs and Steam-account binding.

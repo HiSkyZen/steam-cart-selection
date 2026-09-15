@@ -1,3 +1,13 @@
+## 1.1.0 — 2026-09-16
+
+- Added transaction-bound account-cart recovery with revision tracking and Steam-account binding.
+- Added conservative confirmed-receipt detection and automatic post-purchase restoration without persisting the Steam Web API token.
+- Added post-restore verification for product identity and gift/private flags; recovery state is retained on any mismatch.
+- Added recovery-failure alerts and background product-page opening for affected items.
+- Hardened coupon and unknown-special-flag handling: unsafe parked items are rejected before destructive fallback begins.
+- Kept the verified temporary-cart path for plain purchases and the existing manual recovery controls as fallbacks.
+- No automated test suite was added; this remains a compact userscript intentionally coupled to Steam's live web APIs.
+
 ## 1.0.2 — 2026-09-16
 
 - Fixed the in-panel version label so it reads the installed userscript version from `GM_info` instead of showing a hard-coded `v1.0.0`.

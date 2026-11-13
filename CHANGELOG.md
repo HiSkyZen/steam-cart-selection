@@ -1,3 +1,11 @@
+## 1.1.5 — 2026-11-13
+
+- Fixed logged-out carts that appeared empty after Steam's new SSR cart rollout.
+- Added bounded discovery of Steam's hydrated cart object inside `window.SSR.loaderData` and prefer that exact page state when it contains cart items.
+- Added page-origin ShoppingCart API requests for anonymous carts, with the previous userscript transport retained only as a fallback.
+- Updated anonymous temporary-cart creation, package/bundle insertion, and verification to use the same page-origin transport.
+- Retained signed-in AccountCart behavior, recovery safeguards, and legacy `#application_config` compatibility.
+
 ## 1.1.4 — 2026-11-13
 
 - Fixed Steam's new Store SSR cart UI, which removed the legacy `#application_config` bootstrap element.

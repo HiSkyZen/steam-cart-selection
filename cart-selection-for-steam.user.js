@@ -64,7 +64,7 @@
 // @description:uk  Вибирайте й купуйте лише потрібні товари з кошика Steam, зберігаючи решту.
 // @description:vi  Chọn và mua chỉ những mục bạn muốn trong giỏ hàng Steam, đồng thời giữ nguyên các mục còn lại.
 // @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.1.4
+// @version      1.1.5
 // @author       HiSkyZen
 // @license      MIT
 // @match        https://store.steampowered.com/cart*
@@ -91,7 +91,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'Cart Selection for Steam';
-  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.4';
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.5';
   const RECOVERY_KEY = 'cfs_recovery_v1';
   const LEGACY_RECOVERY_KEY = 'ssc_recovery_v1';
   const LANGUAGE_KEY = 'cfs_language_v1';
@@ -1487,6 +1487,104 @@
     return window;
   }
 
+  function cartLinesFromObject(value) {
+    if (!value || typeof value !== 'object') return null;
+    if (Array.isArray(value.line_items)) return value.line_items;
+    if (Array.isArray(value.lineitems)) return value.lineitems;
+    if (value.contents && typeof value.contents === 'object') {
+      if (Array.isArray(value.contents.line_items)) return value.contents.line_items;
+      if (Array.isArray(value.contents.lineitems)) return value.contents.lineitems;
+    }
+    return null;
+  }
+
+  function looksLikeCartLineItem(item) {
+    if (!item || typeof item !== 'object') return false;
+    return Boolean(
+      item.packageid || item.bundleid || item.package_item || item.packageitem ||
+      item.bundle_item || item.bundleitem || item.line_item_id || item.lineitemid ||
+      item.gidlineitem || item.type === 1 || item.type === 2
+    );
+  }
+
+  function findCartCandidate(root) {
+    if (!root || typeof root !== 'object') return null;
+
+    const seen = new WeakSet();
+    const queue = [{ value: root, depth: 0 }];
+    let best = null;
+    let visited = 0;
+
+    while (queue.length && visited < 3000) {
+      const { value, depth } = queue.shift();
+      if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      visited += 1;
+
+      const lines = cartLinesFromObject(value);
+      if (lines) {
+        const cartishLines = lines.filter(looksLikeCartLineItem).length;
+        const gid = normalizeUint64(
+          value.gidshoppingcart ?? value.gid_shopping_cart ?? value.gid ??
+          value.contents?.gidshoppingcart ?? value.contents?.gid_shopping_cart ?? value.contents?.gid
+        );
+        let score = cartishLines * 20;
+        if (lines.length && cartishLines === lines.length) score += 25;
+        if (gid) score += 30;
+        if ('line_items' in value || 'lineitems' in value) score += 15;
+        if ('contents' in value) score += 5;
+
+        if (!best || score > best.score) best = { value, score };
+      }
+
+      if (depth >= 8) continue;
+      if (Array.isArray(value)) {
+        for (const child of value.slice(0, 250)) {
+          if (child && typeof child === 'object') queue.push({ value: child, depth: depth + 1 });
+        }
+      } else {
+        for (const child of Object.values(value)) {
+          if (child && typeof child === 'object') queue.push({ value: child, depth: depth + 1 });
+        }
+      }
+    }
+
+    return best?.value || null;
+  }
+
+  function findNamedUint64(root, names) {
+    if (!root || typeof root !== 'object') return null;
+    const wanted = new Set(names.map(name => String(name).toLowerCase()));
+    const seen = new WeakSet();
+    const queue = [{ value: root, depth: 0 }];
+    let visited = 0;
+
+    while (queue.length && visited < 2500) {
+      const { value, depth } = queue.shift();
+      if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      visited += 1;
+
+      if (!Array.isArray(value)) {
+        for (const [key, child] of Object.entries(value)) {
+          if (wanted.has(String(key).toLowerCase())) {
+            const gid = normalizeUint64(child);
+            if (gid) return gid;
+          }
+        }
+      }
+
+      if (depth >= 8) continue;
+      const children = Array.isArray(value) ? value : Object.values(value);
+      for (const child of children.slice(0, 250)) {
+        if (child && typeof child === 'object') queue.push({ value: child, depth: depth + 1 });
+      }
+    }
+    return null;
+  }
+
   function readConfig() {
     const page = pageWindow();
     const legacy = document.querySelector('#application_config');
@@ -1494,6 +1592,9 @@
     const modernBase = page?.Config && typeof page.Config === 'object' ? page.Config : {};
     const modernUser = page?.UserConfig && typeof page.UserConfig === 'object' ? page.UserConfig : {};
     const modernWeb = page?.WebConfig && typeof page.WebConfig === 'object' ? page.WebConfig : {};
+    const ssrLoaderData = page?.SSR?.loaderData && typeof page.SSR.loaderData === 'object'
+      ? page.SSR.loaderData
+      : null;
 
     const legacyBase = legacy ? safeJson(legacy.getAttribute('data-config')) : {};
     const legacyUser = legacy ? safeJson(legacy.getAttribute('data-store_user_config')) : {};
@@ -1503,14 +1604,23 @@
     const base = { ...modernBase, ...legacyBase };
     const user = { ...modernUser, ...legacyUser };
 
-    const embeddedCart = user.shoppingcart && typeof user.shoppingcart === 'object'
+    const userEmbeddedCart = user.shoppingcart && typeof user.shoppingcart === 'object'
       ? user.shoppingcart
       : null;
+    const ssrEmbeddedCart = findCartCandidate(ssrLoaderData);
+    const embeddedCart = userEmbeddedCart || ssrEmbeddedCart;
+
     const embeddedGid = normalizeUint64(
       embeddedCart?.gidshoppingcart ?? embeddedCart?.gid_shopping_cart ?? embeddedCart?.gid ??
+      embeddedCart?.contents?.gidshoppingcart ?? embeddedCart?.contents?.gid_shopping_cart ??
+      embeddedCart?.contents?.gid ??
       (typeof user.shoppingcart === 'string' || typeof user.shoppingcart === 'number'
         ? user.shoppingcart
         : null)
+    );
+    const ssrNamedGid = findNamedUint64(
+      ssrLoaderData,
+      ['shoppingCartGID', 'gidshoppingcart', 'gid_shopping_cart']
     );
 
     const urlLanguage = new URL(location.href).searchParams.get('l');
@@ -1525,7 +1635,7 @@
       country: base.COUNTRY || base.country || user.country_code || user.country || null,
       language,
       browserid: normalizeUint64(readCookie('browserid')),
-      guestCartGid: normalizeUint64(readCookie('shoppingCartGID')) || embeddedGid,
+      guestCartGid: normalizeUint64(readCookie('shoppingCartGID')) || embeddedGid || ssrNamedGid,
       embeddedShoppingCart: embeddedCart,
       _pageConfigPresent: Boolean(
         legacy ||
@@ -1587,6 +1697,55 @@
         ontimeout: () => reject(new Error(`Request timeout: ${url}`)),
       });
     });
+  }
+
+  async function pageApiRequest(serviceMethod, { method = 'GET', input = null } = {}) {
+    const page = pageWindow();
+    const pageFetch = page?.fetch;
+    if (typeof pageFetch !== 'function') throw new Error('Steam page fetch is unavailable.');
+
+    let url = `${API_BASE}/${serviceMethod}`;
+    const options = {
+      method,
+      credentials: 'include',
+      mode: 'cors',
+      headers: {},
+    };
+
+    if (method === 'GET') {
+      if (input) {
+        const sep = url.includes('?') ? '&' : '?';
+        url += `${sep}input_json=${encodeURIComponent(JSON.stringify(input))}`;
+      }
+    } else {
+      options.headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+      options.body = `input_json=${encodeURIComponent(JSON.stringify(input || {}))}`;
+    }
+
+    const response = await pageFetch.call(page, url, options);
+    const text = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`);
+
+    try { return JSON.parse(text || '{}'); }
+    catch { throw new Error('Steam API returned invalid JSON.'); }
+  }
+
+  async function guestApiGet(serviceMethod, input = null) {
+    try {
+      return await pageApiRequest(serviceMethod, { method: 'GET', input });
+    } catch (pageError) {
+      log('Page-context guest API GET failed; trying userscript transport.', pageError);
+      return apiGet(serviceMethod, null, input);
+    }
+  }
+
+  async function guestApiPost(serviceMethod, input = {}) {
+    try {
+      return await pageApiRequest(serviceMethod, { method: 'POST', input });
+    } catch (pageError) {
+      log('Page-context guest API POST failed; trying userscript transport.', pageError);
+      return apiPost(serviceMethod, null, input);
+    }
   }
 
   function apiUrl(serviceMethod, token = null) {
@@ -1700,12 +1859,27 @@
   async function getGuestCart() {
     const gid = currentGuestCartGid();
     const embedded = normalizeEmbeddedGuestCart(state.config?.embeddedShoppingCart, gid);
-    if (!gid) return embedded || { gidshoppingcart: null, line_items: [], is_valid: true, _guest_cart: true };
+
+    // The new Steam SSR cart already hydrates a normalized cart into loaderData.
+    // Prefer that exact page state when it contains items; it is what Steam's own UI renders.
+    if (embedded?.line_items?.length) {
+      if (state.config && embedded.gidshoppingcart) {
+        state.config.guestCartGid = String(embedded.gidshoppingcart);
+      }
+      log('Using Steam SSR embedded guest cart.', {
+        items: embedded.line_items.length,
+        hasGid: Boolean(embedded.gidshoppingcart || gid),
+      });
+      return embedded;
+    }
+
+    if (!gid) {
+      return embedded || { gidshoppingcart: null, line_items: [], is_valid: true, _guest_cart: true };
+    }
 
     try {
-      const data = await apiGet(
+      const data = await guestApiGet(
         'IShoppingCartService/GetShoppingCartContents/v1/',
-        null,
         { gidshoppingcart: String(gid) },
       );
       const response = data?.response;
@@ -2113,11 +2287,16 @@
       const createInput = {};
       if (/^\d{17}$/.test(state.config.steamid)) createInput.steamid_requester = state.config.steamid;
 
-      const created = await apiPost(
-        'IShoppingCartService/CreateNewShoppingCart/v1/',
-        state.config.token,
-        createInput,
-      );
+      const created = state.config?.token
+        ? await apiPost(
+            'IShoppingCartService/CreateNewShoppingCart/v1/',
+            state.config.token,
+            createInput,
+          )
+        : await guestApiPost(
+            'IShoppingCartService/CreateNewShoppingCart/v1/',
+            createInput,
+          );
       const gid = created?.response?.gidshoppingcart;
       if (!gid) return null;
 
@@ -2136,35 +2315,49 @@
           };
         });
 
-        const addPackages = await apiPost(
-          'IShoppingCartService/AddPackages/v1/',
-          state.config.token,
-          {
-            gidshoppingcart: String(gid),
-            ...browserField,
-            ...countryField('store_country_code'),
-            cart_items: cartItems,
-          },
-        );
+        const addPackagesInput = {
+          gidshoppingcart: String(gid),
+          ...browserField,
+          ...countryField('store_country_code'),
+          cart_items: cartItems,
+        };
+        const addPackages = state.config?.token
+          ? await apiPost(
+              'IShoppingCartService/AddPackages/v1/',
+              state.config.token,
+              addPackagesInput,
+            )
+          : await guestApiPost(
+              'IShoppingCartService/AddPackages/v1/',
+              addPackagesInput,
+            );
         log('Temporary cart AddPackages response', addPackages?.response || addPackages);
       }
 
       for (const item of bundles) {
-        const addBundle = await apiPost('IShoppingCartService/AddBundle/v1/', state.config.token, {
+        const addBundleInput = {
           gidshoppingcart: String(gid),
           bundleid: Number(item.bundleid),
           ...browserField,
           ...countryField('store_country'),
           quantity: 1,
-        });
+        };
+        const addBundle = state.config?.token
+          ? await apiPost('IShoppingCartService/AddBundle/v1/', state.config.token, addBundleInput)
+          : await guestApiPost('IShoppingCartService/AddBundle/v1/', addBundleInput);
         log('Temporary cart AddBundle response', addBundle?.response || addBundle);
       }
 
-      const verify = await apiGet(
-        'IShoppingCartService/GetShoppingCartContents/v1/',
-        state.config.token,
-        { gidshoppingcart: String(gid) },
-      );
+      const verify = state.config?.token
+        ? await apiGet(
+            'IShoppingCartService/GetShoppingCartContents/v1/',
+            state.config.token,
+            { gidshoppingcart: String(gid) },
+          )
+        : await guestApiGet(
+            'IShoppingCartService/GetShoppingCartContents/v1/',
+            { gidshoppingcart: String(gid) },
+          );
       const contents = verify?.response?.contents;
       const lineItems = contents?.lineitems || contents?.line_items || [];
       if (!contents) throw new Error('Temporary cart returned no contents.');

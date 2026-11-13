@@ -64,7 +64,7 @@
 // @description:uk  Вибирайте й купуйте лише потрібні товари з кошика Steam, зберігаючи решту.
 // @description:vi  Chọn và mua chỉ những mục bạn muốn trong giỏ hàng Steam, đồng thời giữ nguyên các mục còn lại.
 // @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.1.5
+// @version      1.1.6
 // @author       HiSkyZen
 // @license      MIT
 // @match        https://store.steampowered.com/cart*
@@ -91,7 +91,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'Cart Selection for Steam';
-  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.5';
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.6';
   const RECOVERY_KEY = 'cfs_recovery_v1';
   const LEGACY_RECOVERY_KEY = 'ssc_recovery_v1';
   const LANGUAGE_KEY = 'cfs_language_v1';
@@ -1487,6 +1487,98 @@
     return window;
   }
 
+  function parseSsrLoaderData(raw) {
+    const entries = Array.isArray(raw) ? raw : (raw == null ? [] : [raw]);
+    return entries.map(entry => {
+      if (typeof entry !== 'string') return entry;
+      const trimmed = entry.trim();
+      if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return entry;
+      try { return JSON.parse(trimmed); } catch { return entry; }
+    });
+  }
+
+  function findNamedString(root, names) {
+    if (!root || typeof root !== 'object') return null;
+    const wanted = new Set(names.map(name => String(name).toLowerCase()));
+    const seen = new WeakSet();
+    const queue = [{ value: root, depth: 0 }];
+    let visited = 0;
+
+    while (queue.length && visited < 2500) {
+      const { value, depth } = queue.shift();
+      if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      visited += 1;
+
+      if (!Array.isArray(value)) {
+        for (const [key, child] of Object.entries(value)) {
+          if (wanted.has(String(key).toLowerCase()) && typeof child === 'string' && child.trim()) {
+            return child.trim();
+          }
+        }
+      }
+
+      if (depth >= 8) continue;
+      const children = Array.isArray(value) ? value : Object.values(value);
+      for (const child of children.slice(0, 250)) {
+        if (child && typeof child === 'object') queue.push({ value: child, depth: depth + 1 });
+      }
+    }
+    return null;
+  }
+
+  function findCartId(root) {
+    if (!root || typeof root !== 'object') return null;
+    const seen = new WeakSet();
+    const queue = [{ value: root, depth: 0 }];
+    let visited = 0;
+
+    while (queue.length && visited < 2500) {
+      const { value, depth } = queue.shift();
+      if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      visited += 1;
+
+      if (!Array.isArray(value) && value.cartID && typeof value.cartID === 'object') {
+        const type = String(value.cartID.type || '').toLowerCase();
+        if (['account', 'anonymous', 'replay', 'request', 'history'].includes(type)) {
+          return {
+            ...value.cartID,
+            type,
+            ...(value.cartID.gid != null ? { gid: String(value.cartID.gid) } : {}),
+          };
+        }
+      }
+
+      if (depth >= 8) continue;
+      const children = Array.isArray(value) ? value : Object.values(value);
+      for (const child of children.slice(0, 250)) {
+        if (child && typeof child === 'object') queue.push({ value: child, depth: depth + 1 });
+      }
+    }
+    return null;
+  }
+
+  function firstLoaderObjectWith(root, key) {
+    if (!Array.isArray(root)) return null;
+    for (const entry of root) {
+      if (entry && typeof entry === 'object' && !Array.isArray(entry) && entry[key] != null) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function isGuestConfig(config = state.config) {
+    if (!config) return true;
+    if (config.cartType === 'anonymous') return true;
+    if (config.cartType === 'account') return false;
+    if (config.loggedIn === true) return false;
+    return !config.token;
+  }
+
   function cartLinesFromObject(value) {
     if (!value || typeof value !== 'object') return null;
     if (Array.isArray(value.line_items)) return value.line_items;
@@ -1592,17 +1684,32 @@
     const modernBase = page?.Config && typeof page.Config === 'object' ? page.Config : {};
     const modernUser = page?.UserConfig && typeof page.UserConfig === 'object' ? page.UserConfig : {};
     const modernWeb = page?.WebConfig && typeof page.WebConfig === 'object' ? page.WebConfig : {};
-    const ssrLoaderData = page?.SSR?.loaderData && typeof page.SSR.loaderData === 'object'
-      ? page.SSR.loaderData
-      : null;
+    const rawLoaderData = page?.SSR?.loaderData ?? null;
+    const ssrLoaderData = parseSsrLoaderData(rawLoaderData);
 
     const legacyBase = legacy ? safeJson(legacy.getAttribute('data-config')) : {};
     const legacyUser = legacy ? safeJson(legacy.getAttribute('data-store_user_config')) : {};
 
-    // Steam's current Store UI bootstraps Config/UserConfig/WebConfig through SSR.
-    // Keep the legacy #application_config path as a compatibility fallback.
     const base = { ...modernBase, ...legacyBase };
     const user = { ...modernUser, ...legacyUser };
+
+    // Steam's current SSR cart serializes route loader payloads as JSON strings.
+    // The first route payload contains the signed-in Web API token/context, while
+    // the cart payload contains an authoritative cartID ({type:'account'} or
+    // {type:'anonymous', gid:'...'}).
+    const loaderContext = firstLoaderObjectWith(ssrLoaderData, 'storeBrowseContext') ||
+      firstLoaderObjectWith(ssrLoaderData, 'strWebAPIToken') || {};
+    const loaderStoreContext = loaderContext?.storeBrowseContext &&
+      typeof loaderContext.storeBrowseContext === 'object'
+      ? loaderContext.storeBrowseContext
+      : {};
+    const cartID = findCartId(ssrLoaderData);
+
+    const loaderToken = findNamedString(
+      ssrLoaderData,
+      ['strWebAPIToken', 'webapi_token', 'WEBAPI_TOKEN']
+    );
+    const loaderSteamid = findNamedUint64(ssrLoaderData, ['steamid']);
 
     const userEmbeddedCart = user.shoppingcart && typeof user.shoppingcart === 'object'
       ? user.shoppingcart
@@ -1622,23 +1729,39 @@
       ssrLoaderData,
       ['shoppingCartGID', 'gidshoppingcart', 'gid_shopping_cart']
     );
+    const cartIdGid = cartID?.type === 'anonymous' ? normalizeUint64(cartID.gid) : null;
 
     const urlLanguage = new URL(location.href).searchParams.get('l');
     const language = normalizeSteamLanguage(
-      base.LANGUAGE || base.language || user.language || urlLanguage ||
-      document.documentElement.lang || navigator.language || 'english'
+      loaderStoreContext.language || base.LANGUAGE || base.language || user.language ||
+      urlLanguage || document.documentElement.lang || navigator.language || 'english'
     );
 
+    const token = user.webapi_token || user.WEBAPI_TOKEN || loaderToken || null;
+    const steamid = String(
+      user.steamid || user.STEAMID || user.steam_id || loaderSteamid || loaderContext?.steamid || ''
+    );
+    const loggedIn = cartID?.type === 'account'
+      ? true
+      : cartID?.type === 'anonymous'
+        ? false
+        : Boolean(user.logged_in || token);
+
     return {
-      token: user.webapi_token || user.WEBAPI_TOKEN || null,
-      steamid: String(user.steamid || user.STEAMID || user.steam_id || ''),
-      country: base.COUNTRY || base.country || user.country_code || user.country || null,
+      token,
+      steamid,
+      loggedIn,
+      cartType: cartID?.type || (loggedIn ? 'account' : null),
+      country: loaderStoreContext.country || base.COUNTRY || base.country ||
+        user.country_code || user.country || null,
       language,
       browserid: normalizeUint64(readCookie('browserid')),
-      guestCartGid: normalizeUint64(readCookie('shoppingCartGID')) || embeddedGid || ssrNamedGid,
+      guestCartGid: cartIdGid || normalizeUint64(readCookie('shoppingCartGID')) ||
+        embeddedGid || ssrNamedGid,
       embeddedShoppingCart: embeddedCart,
       _pageConfigPresent: Boolean(
         legacy ||
+        rawLoaderData ||
         (page?.Config && typeof page.Config === 'object') ||
         (page?.UserConfig && typeof page.UserConfig === 'object') ||
         (page?.WebConfig && typeof page.WebConfig === 'object') ||
@@ -1654,9 +1777,9 @@
     while (Date.now() - start < timeoutMs) {
       last = readConfig();
 
-      // A signed-in token, an anonymous cart GID, or Steam's SSR/legacy config
-      // is sufficient. Logged-out Steam pages intentionally have no webapi_token.
-      if (last.token || last.guestCartGid || last._pageConfigPresent) return last;
+      // cartID is authoritative on the current SSR cart route. A token/GID or
+      // legacy page config is retained as fallback for older Steam surfaces.
+      if (last.cartType || last.token || last.guestCartGid || last._pageConfigPresent) return last;
 
       await sleep(100);
     }
@@ -1666,6 +1789,8 @@
     return last || {
       token: null,
       steamid: '',
+      loggedIn: false,
+      cartType: null,
       country: null,
       language: 'english',
       browserid: normalizeUint64(readCookie('browserid')),
@@ -1905,7 +2030,11 @@
   }
 
   async function getActiveCart() {
-    return state.config?.token ? getAccountCart() : getGuestCart();
+    if (state.config?.cartType === 'account' || (!isGuestConfig() && state.config?.token)) {
+      if (!state.config?.token) throw new Error(t('tokenMissing'));
+      return getAccountCart();
+    }
+    return getGuestCart();
   }
 
   function lineKey(item) {
@@ -2255,7 +2384,7 @@
 
   function canUseDirectCart(items) {
     if (!items.length) return false;
-    if (!state.config?.token) {
+    if (isGuestConfig()) {
       // A guest has no account ownership state to preserve. Steam will validate and
       // re-price the isolated cart again when checkout/login begins.
       return items.every(item => {
@@ -2287,7 +2416,7 @@
       const createInput = {};
       if (/^\d{17}$/.test(state.config.steamid)) createInput.steamid_requester = state.config.steamid;
 
-      const created = state.config?.token
+      const created = !isGuestConfig() && state.config?.token
         ? await apiPost(
             'IShoppingCartService/CreateNewShoppingCart/v1/',
             state.config.token,
@@ -2321,7 +2450,7 @@
           ...countryField('store_country_code'),
           cart_items: cartItems,
         };
-        const addPackages = state.config?.token
+        const addPackages = !isGuestConfig() && state.config?.token
           ? await apiPost(
               'IShoppingCartService/AddPackages/v1/',
               state.config.token,
@@ -2342,13 +2471,13 @@
           ...countryField('store_country'),
           quantity: 1,
         };
-        const addBundle = state.config?.token
+        const addBundle = !isGuestConfig() && state.config?.token
           ? await apiPost('IShoppingCartService/AddBundle/v1/', state.config.token, addBundleInput)
           : await guestApiPost('IShoppingCartService/AddBundle/v1/', addBundleInput);
         log('Temporary cart AddBundle response', addBundle?.response || addBundle);
       }
 
-      const verify = state.config?.token
+      const verify = !isGuestConfig() && state.config?.token
         ? await apiGet(
             'IShoppingCartService/GetShoppingCartContents/v1/',
             state.config.token,
@@ -2420,7 +2549,7 @@
       if (existingRecovery?.items?.length) throw new Error(t('previousRecovery'));
 
       if (!state.config) state.config = await waitForConfig();
-      const guestMode = !state.config.token;
+      const guestMode = isGuestConfig(state.config);
       const freshCart = await getActiveCart();
       const freshItems = freshCart.line_items || [];
       if (!freshItems.length) throw new Error(t('cartEmpty'));

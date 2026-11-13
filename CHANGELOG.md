@@ -1,3 +1,11 @@
+## 1.1.4 — 2026-11-13
+
+- Fixed Steam's new Store SSR cart UI, which removed the legacy `#application_config` bootstrap element.
+- Added configuration discovery through the current `window.Config`, `window.UserConfig`, and `window.WebConfig` globals while retaining the legacy parser as a fallback.
+- Removed the hard failure when page configuration is absent so logged-out guest carts can continue through cookie-based `shoppingCartGID` discovery.
+- Added `unsafeWindow` access for userscript managers so Steam page globals can be read from the page context.
+- Kept the existing signed-in account-cart and recovery paths unchanged.
+
 ## 1.1.3 — 2026-09-16
 
 - Added logged-out Steam guest-cart support using Steam's `shoppingCartGID` cart identifier.

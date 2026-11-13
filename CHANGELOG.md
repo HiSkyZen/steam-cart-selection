@@ -1,3 +1,11 @@
+## 1.1.6 — 2026-11-13
+
+- Fixed current Steam SSR cart detection using a real captured cart page as the reference structure.
+- Steam now serializes route `loaderData` entries as JSON strings; the userscript parses them before inspecting cart state.
+- Restored signed-in AccountCart detection by reading `strWebAPIToken` from SSR loader data instead of assuming it exists in `UserConfig.webapi_token`.
+- Added authoritative `cartID` handling: `{type: "account"}` selects AccountCart, while `{type: "anonymous", gid: ...}` selects the guest ShoppingCart flow.
+- Removed the fragile assumption that presence or absence of a token alone determines whether the cart is signed-in or anonymous.
+
 ## 1.1.5 — 2026-11-13
 
 - Fixed logged-out carts that appeared empty after Steam's new SSR cart rollout.

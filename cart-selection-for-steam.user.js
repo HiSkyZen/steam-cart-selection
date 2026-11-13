@@ -64,7 +64,7 @@
 // @description:uk  Вибирайте й купуйте лише потрібні товари з кошика Steam, зберігаючи решту.
 // @description:vi  Chọn và mua chỉ những mục bạn muốn trong giỏ hàng Steam, đồng thời giữ nguyên các mục còn lại.
 // @namespace    https://github.com/HiSkyZen/steam-cart-selection
-// @version      1.1.3
+// @version      1.1.4
 // @author       HiSkyZen
 // @license      MIT
 // @match        https://store.steampowered.com/cart*
@@ -78,6 +78,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_info
 // @grant        GM_openInTab
+// @grant        unsafeWindow
 // @connect      api.steampowered.com
 // @homepageURL   https://github.com/HiSkyZen/steam-cart-selection
 // @supportURL    https://github.com/HiSkyZen/steam-cart-selection/issues
@@ -90,7 +91,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'Cart Selection for Steam';
-  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.3';
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) ? GM_info.script.version : '1.1.4';
   const RECOVERY_KEY = 'cfs_recovery_v1';
   const LEGACY_RECOVERY_KEY = 'ssc_recovery_v1';
   const LANGUAGE_KEY = 'cfs_language_v1';
@@ -1479,37 +1480,89 @@
     return /^\d{1,20}$/.test(text) && text !== '0' ? text : null;
   }
 
+  function pageWindow() {
+    try {
+      if (typeof unsafeWindow !== 'undefined' && unsafeWindow) return unsafeWindow;
+    } catch {}
+    return window;
+  }
+
   function readConfig() {
-    const el = document.querySelector('#application_config');
-    if (!el) return null;
-    const base = safeJson(el.getAttribute('data-config'));
-    const user = safeJson(el.getAttribute('data-store_user_config'));
-    const embeddedCart = user.shoppingcart && typeof user.shoppingcart === 'object' ? user.shoppingcart : null;
+    const page = pageWindow();
+    const legacy = document.querySelector('#application_config');
+
+    const modernBase = page?.Config && typeof page.Config === 'object' ? page.Config : {};
+    const modernUser = page?.UserConfig && typeof page.UserConfig === 'object' ? page.UserConfig : {};
+    const modernWeb = page?.WebConfig && typeof page.WebConfig === 'object' ? page.WebConfig : {};
+
+    const legacyBase = legacy ? safeJson(legacy.getAttribute('data-config')) : {};
+    const legacyUser = legacy ? safeJson(legacy.getAttribute('data-store_user_config')) : {};
+
+    // Steam's current Store UI bootstraps Config/UserConfig/WebConfig through SSR.
+    // Keep the legacy #application_config path as a compatibility fallback.
+    const base = { ...modernBase, ...legacyBase };
+    const user = { ...modernUser, ...legacyUser };
+
+    const embeddedCart = user.shoppingcart && typeof user.shoppingcart === 'object'
+      ? user.shoppingcart
+      : null;
     const embeddedGid = normalizeUint64(
       embeddedCart?.gidshoppingcart ?? embeddedCart?.gid_shopping_cart ?? embeddedCart?.gid ??
-      (typeof user.shoppingcart === 'string' || typeof user.shoppingcart === 'number' ? user.shoppingcart : null)
+      (typeof user.shoppingcart === 'string' || typeof user.shoppingcart === 'number'
+        ? user.shoppingcart
+        : null)
     );
+
+    const urlLanguage = new URL(location.href).searchParams.get('l');
+    const language = normalizeSteamLanguage(
+      base.LANGUAGE || base.language || user.language || urlLanguage ||
+      document.documentElement.lang || navigator.language || 'english'
+    );
+
     return {
-      token: user.webapi_token || null,
+      token: user.webapi_token || user.WEBAPI_TOKEN || null,
       steamid: String(user.steamid || user.STEAMID || user.steam_id || ''),
-      country: base.COUNTRY || base.country || null,
-      language: base.LANGUAGE || base.language || 'english',
+      country: base.COUNTRY || base.country || user.country_code || user.country || null,
+      language,
       browserid: normalizeUint64(readCookie('browserid')),
       guestCartGid: normalizeUint64(readCookie('shoppingCartGID')) || embeddedGid,
       embeddedShoppingCart: embeddedCart,
+      _pageConfigPresent: Boolean(
+        legacy ||
+        (page?.Config && typeof page.Config === 'object') ||
+        (page?.UserConfig && typeof page.UserConfig === 'object') ||
+        (page?.WebConfig && typeof page.WebConfig === 'object') ||
+        Object.keys(modernWeb).length
+      ),
     };
   }
 
-  async function waitForConfig(timeoutMs = 15000) {
+  async function waitForConfig(timeoutMs = 5000) {
     const start = Date.now();
+    let last = readConfig();
+
     while (Date.now() - start < timeoutMs) {
-      const cfg = readConfig();
-      // Logged-out Steam pages intentionally have no webapi_token. The application
-      // config itself is enough; guest carts are identified by shoppingCartGID.
-      if (cfg) return cfg;
-      await sleep(200);
+      last = readConfig();
+
+      // A signed-in token, an anonymous cart GID, or Steam's SSR/legacy config
+      // is sufficient. Logged-out Steam pages intentionally have no webapi_token.
+      if (last.token || last.guestCartGid || last._pageConfigPresent) return last;
+
+      await sleep(100);
     }
-    return readConfig();
+
+    // Configuration globals are an optimization, not a hard requirement for guest
+    // carts. Return a minimal config so cookie-based anonymous carts can still work.
+    return last || {
+      token: null,
+      steamid: '',
+      country: null,
+      language: 'english',
+      browserid: normalizeUint64(readCookie('browserid')),
+      guestCartGid: normalizeUint64(readCookie('shoppingCartGID')),
+      embeddedShoppingCart: null,
+      _pageConfigPresent: false,
+    };
   }
 
   function gmRequest({ method = 'GET', url, headers = {}, data = undefined, timeout = 15000 }) {
@@ -2174,7 +2227,6 @@
       if (existingRecovery?.items?.length) throw new Error(t('previousRecovery'));
 
       if (!state.config) state.config = await waitForConfig();
-      if (!state.config) throw new Error('Steam page configuration is unavailable.');
       const guestMode = !state.config.token;
       const freshCart = await getActiveCart();
       const freshItems = freshCart.line_items || [];
@@ -2593,7 +2645,6 @@
       state.busy = true;
       setStatus(t('readingCart'));
       state.config = await waitForConfig();
-      if (!state.config) throw new Error('Steam page configuration is unavailable.');
       if (state.config?.language) { uiLanguage = normalizeSteamLanguage(state.config.language); GM_setValue(LANGUAGE_KEY, uiLanguage); }
 
       state.cart = await getActiveCart();

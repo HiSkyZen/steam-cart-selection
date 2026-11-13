@@ -59,6 +59,8 @@ If automatic restoration cannot be verified, recovery state is retained, an aler
 
 If checkout was interrupted before Steam produced a confirmed receipt, use the checkout banner or reopen the Steam cart and choose **Restore now**. A confirmed receipt triggers automatic restoration. If verification fails, the recovery record is kept instead of being discarded, and the affected product pages are opened to make manual recovery straightforward.
 
+The current Steam Store cart uses SSR-provided `window.Config`, `window.UserConfig`, and `window.WebConfig` globals. The userscript also keeps the older `#application_config` parser as a compatibility fallback, so it can tolerate both Store UI generations.
+
 If Steam changes its internal cart APIs, open an issue and include the visible error message and reproduction steps. Avoid posting HAR files publicly without removing authentication tokens first.
 
 ## License
